@@ -30,7 +30,10 @@ class IFCExtractorApp(ctk.CTk):
         # ── State ─────────────────────────────────────────────────────
         self._ifc_files: list[str] = []
         self._loaded_dfs: dict = {}
-        self._output_dir   = tk.StringVar(value=os.path.expanduser("~"))
+        _downloads = os.path.join(os.path.expanduser("~"), "Downloads")
+        self._output_dir   = tk.StringVar(
+            value=_downloads if os.path.isdir(_downloads) else os.path.expanduser("~")
+        )
         self._export_mode  = tk.StringVar(value="per_ifc")
 
         self._mod_metadata   = tk.BooleanVar(value=True)
@@ -311,7 +314,7 @@ class IFCExtractorApp(ctk.CTk):
                 dfs = {}
 
                 if self._mod_metadata.get():
-                    dfs["Metadata"] = metadata.extract(ifc, name)
+                    dfs["Metadata"] = metadata.extract(ifc, name, source_filepath=path)
 
                 if self._mod_hierarchy.get():
                     self._log_msg("  Extracting hierarchy…")
@@ -448,4 +451,4 @@ class IFCExtractorApp(ctk.CTk):
 
     # ══════════════════════════════════════════════════════════════════
     # Log
-    # ═════�
+    # ═════�

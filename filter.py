@@ -94,4 +94,6 @@ def _filter_by_column(
     If the DataFrame has the given column, keep only rows whose value is
     in allowed_values. Otherwise return df unchanged.
     """
-    if column not in df.columns or not allowed_
+    if column not in df.columns or not allowed_values:
+        return df
+    return df[df[column].isin(allowed_values)].reset_index(drop=True)

@@ -180,4 +180,8 @@ def _append_row(
     col_data["space_name"].append(space_name)
     col_data["space_long_name"].append(space_long_name)
     col_data["element_global_id"].append(getattr(element, "GlobalId", "") or "")
-    col_data["element_ifc_type
+    col_data["element_ifc_type"].append(element.is_a())
+    col_data["element_name"].append(getattr(element, "Name", "") or "")
+    col_data["x"].append(x)
+    col_data["y"].append(y)
+    col_data["z"].append(z)

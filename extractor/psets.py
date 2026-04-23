@@ -118,4 +118,7 @@ def _get_unit_label(prop) -> str:
         prefix = getattr(unit, "Prefix", "") or ""
         return f"{prefix}{name}".strip()
     # IfcDerivedUnit
-    us
+    user_defined = getattr(unit, "UserDefinedType", None)
+    if user_defined:
+        return str(user_defined)
+    return ""
