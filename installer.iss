@@ -32,6 +32,7 @@ DisableProgramGroupPage=yes
 OutputDir=installer
 OutputBaseFilename=IFC_Extractor_Setup
 Compression=lzma2/ultra64
+SetupIconFile=icon.ico
 SolidCompression=yes
 WizardStyle=modern
 ; Require normal user rights — no admin needed to install to user AppData
