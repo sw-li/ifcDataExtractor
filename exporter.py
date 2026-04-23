@@ -8,8 +8,8 @@ Sheet layout:
   Quantities  — all quantity values
 
 Export modes:
-  per_ifc  — one .xlsx per input IFC, named {ifc_filename}_export.xlsx
-  merged   — one .xlsx with a source_file column in every sheet, named merged_export.xlsx
+  per_ifc  — one .xlsx per input IFC, named {ifc_filename}.xlsx
+  merged   — one .xlsx with a source_file column in every sheet, named merged.xlsx
 
 Formatting:
   - Frozen header row
@@ -65,7 +65,7 @@ def export_per_ifc(
 
     for source_filename, dfs in results.items():
         base = os.path.splitext(os.path.basename(source_filename))[0]
-        out_path = os.path.join(output_dir, f"{base}_export.xlsx")
+        out_path = os.path.join(output_dir, f"{base}.xlsx")
         _write_workbook(dfs, out_path)
         created.append(out_path)
         if progress_callback:
@@ -108,7 +108,7 @@ def export_merged(
         ]
         merged[sheet] = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
 
-    out_path = os.path.join(output_dir, "merged_export.xlsx")
+    out_path = os.path.join(output_dir, "merged.xlsx")
     _write_workbook(merged, out_path)
 
     if progress_callback:
