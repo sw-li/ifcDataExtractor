@@ -54,8 +54,8 @@ _MEASURE_TYPES = {
     "IfcElectricVoltageMeasure",
     "IfcFrequencyMeasure",
     "IfcNumericMeasure",
-    "IfcReal",
-    "IfcInteger",
+    # NOTE: IfcReal and IfcInteger intentionally excluded — they are too
+    # generic and capture non-physical values like counts, codes, years, etc.
 }
 
 
