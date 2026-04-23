@@ -26,12 +26,14 @@ from typing import Callable, Optional
 
 
 # ---------------------------------------------------------------------------
-# Colours
+# Colours & shared style objects (created once, reused for every cell)
 # ---------------------------------------------------------------------------
-HEADER_FILL = PatternFill("solid", fgColor="1F4E79")   # dark blue
-HEADER_FONT = Font(color="FFFFFF", bold=True)
-ROW_FILL_ODD = PatternFill("solid", fgColor="FFFFFF")  # white
-ROW_FILL_EVEN = PatternFill("solid", fgColor="DCE6F1") # very light blue
+HEADER_FILL      = PatternFill("solid", fgColor="1F4E79")   # dark blue
+HEADER_FONT      = Font(color="FFFFFF", bold=True)
+ROW_FILL_ODD     = PatternFill("solid", fgColor="FFFFFF")   # white
+ROW_FILL_EVEN    = PatternFill("solid", fgColor="DCE6F1")   # very light blue
+HEADER_ALIGNMENT = Alignment(horizontal="center", vertical="center", wrap_text=False)
+CELL_ALIGNMENT   = Alignment(vertical="center")
 
 
 # ---------------------------------------------------------------------------
@@ -148,18 +150,25 @@ def _write_sheet(ws, df: pd.DataFrame) -> None:
     for cell in header_row:
         cell.fill = HEADER_FILL
         cell.font = HEADER_FONT
-        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=False)
+        cell.alignment = HEADER_ALIGNMENT  # reuse pre-created object
 
     # Freeze header
     ws.freeze_panes = "A2"
 
-    # Data rows with alternating shading
-    for row_idx, row in enumerate(df.itertuples(index=False), start=2):
-        ws.append(list(row))
+    # Pre-convert DataFrame to a list of row-lists once (avoids repeated
+    # namedtuple construction inside itertuples for large DataFrames).
+    # Using df.to_numpy(dtype=object) preserves mixed types correctly.
+    data_rows = df.to_numpy(dtype=object).tolist()
+
+    # Data rows with alternating shading.
+    # CELL_ALIGNMENT is a module-level constant — reusing it avoids
+    # allocating a new Alignment object for every cell (can be millions).
+    for row_idx, row_values in enumerate(data_rows, start=2):
+        ws.append(row_values)
         fill = ROW_FILL_EVEN if row_idx % 2 == 0 else ROW_FILL_ODD
         for cell in ws[row_idx]:
             cell.fill = fill
-            cell.alignment = Alignment(vertical="center")
+            cell.alignment = CELL_ALIGNMENT  # reuse pre-created object
 
     # Auto column width
     for col_idx, col_cells in enumerate(ws.columns, start=1):

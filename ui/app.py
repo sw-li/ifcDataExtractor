@@ -315,17 +315,23 @@ class IFCExtractorApp(ctk.CTk):
 
                 if self._mod_hierarchy.get():
                     self._log_msg("  Extracting hierarchy…")
-                    dfs["Hierarchy"] = hierarchy.extract(ifc, name)
+                    dfs["Hierarchy"] = hierarchy.extract(
+                        ifc, name, progress_callback=self._log_msg
+                    )
                     if not dfs["Hierarchy"].empty:
                         total_elements += len(dfs["Hierarchy"])
 
                 if self._mod_psets.get():
                     self._log_msg("  Extracting property sets…")
-                    dfs["Psets"] = psets.extract(ifc, name)
+                    dfs["Psets"] = psets.extract(
+                        ifc, name, progress_callback=self._log_msg
+                    )
 
                 if self._mod_quantities.get():
                     self._log_msg("  Extracting quantities…")
-                    dfs["Quantities"] = quantities.extract(ifc, name)
+                    dfs["Quantities"] = quantities.extract(
+                        ifc, name, progress_callback=self._log_msg
+                    )
 
                 self._loaded_dfs[path] = dfs
                 self._log_msg(f"  ✓ {name} loaded.")

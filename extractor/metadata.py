@@ -15,7 +15,11 @@ import pandas as pd
 import ifcopenshell
 
 
-def extract(ifc_file: ifcopenshell.file, source_filename: str = "") -> pd.DataFrame:
+def extract(
+    ifc_file: ifcopenshell.file,
+    source_filename: str = "",
+    progress_callback=None,   # accepted for API consistency; metadata is fast
+) -> pd.DataFrame:
     """
     Extract project metadata and georeferencing from an open IFC file.
 
