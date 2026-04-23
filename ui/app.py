@@ -8,6 +8,7 @@ Language switching (EN / FR) is live — no restart required.
 """
 
 import os
+import sys
 import threading
 import tkinter as tk
 
@@ -29,6 +30,17 @@ class IFCExtractorApp(ctk.CTk):
         self.title("IFC Extractor")
         self.geometry("1100x640")
         self.minsize(900, 560)
+
+        # ── Window icon (title bar + taskbar) ─────────────────────────
+        # Resolve icon path for both dev (relative to project root) and
+        # PyInstaller one-folder builds (icon.ico is bundled next to the EXE).
+        _base = getattr(sys, "_MEIPASS", os.path.join(os.path.dirname(__file__), ".."))
+        _icon = os.path.join(_base, "icon.ico")
+        try:
+            if os.path.exists(_icon):
+                self.iconbitmap(_icon)
+        except Exception:
+            pass  # non-Windows platforms may not support .ico
 
         # ── Language ──────────────────────────────────────────────────
         self._lang: str = detect_lang()

@@ -75,7 +75,7 @@ a = Analysis(
     ["main.py"],
     pathex=["."],
     binaries=ifc_binaries + openpyxl_binaries + ctk_binaries,
-    datas=ifc_datas + openpyxl_datas + ctk_datas,
+    datas=ifc_datas + openpyxl_datas + ctk_datas + [("icon.ico", ".")],
     hiddenimports=(
         collect_submodules("ifcopenshell")
         + openpyxl_hiddenimports
