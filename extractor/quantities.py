@@ -215,10 +215,4 @@ def _build_unit_map(ifc_file: ifcopenshell.file) -> dict:
             "FREQUENCYUNIT":   ["IfcFrequencyMeasure"],
         }
         for ifc_types in mapping.get(unit_type, []):
-            unit_map[ifc_types] = label
-    return unit_map
-
-
-def _unit_label_from_measure(measure_type: str, unit_map: dict) -> str:
-    """Best-effort unit label for a measure type."""
-    return unit_map.get(measure_type, "")
+            

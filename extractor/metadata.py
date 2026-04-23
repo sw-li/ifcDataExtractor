@@ -188,9 +188,4 @@ def _extract_projected_crs(ifc_file: ifcopenshell.file) -> dict:
         if not crs_list:
             return result
         crs = crs_list[0]
-        for field in ("Name", "Description", "GeodeticDatum",
-                      "MapProjection", "MapZone"):
-            result[field] = getattr(crs, field, None) or ""
-    except Exception:
-        pass
-    return result
+        for field in ("Name", "Descr
