@@ -14,7 +14,7 @@ Export modes:
 Formatting:
   - Frozen header row
   - Auto column width
-  - Light alternating row shading
+  - Alternating row shading via Excel Table (single XML operation, not per-cell)
 """
 
 import os
@@ -22,18 +22,16 @@ import pandas as pd
 import openpyxl
 from openpyxl.styles import PatternFill, Font, Alignment
 from openpyxl.utils import get_column_letter
+from openpyxl.worksheet.table import Table, TableStyleInfo
 from typing import Callable, Optional
 
 
 # ---------------------------------------------------------------------------
-# Colours & shared style objects (created once, reused for every cell)
+# Shared style objects — created once at import time, reused for every cell
 # ---------------------------------------------------------------------------
 HEADER_FILL      = PatternFill("solid", fgColor="1F4E79")   # dark blue
 HEADER_FONT      = Font(color="FFFFFF", bold=True)
-ROW_FILL_ODD     = PatternFill("solid", fgColor="FFFFFF")   # white
-ROW_FILL_EVEN    = PatternFill("solid", fgColor="DCE6F1")   # very light blue
 HEADER_ALIGNMENT = Alignment(horizontal="center", vertical="center", wrap_text=False)
-CELL_ALIGNMENT   = Alignment(vertical="center")
 
 
 # ---------------------------------------------------------------------------
@@ -138,43 +136,64 @@ def _write_workbook(dfs: dict[str, pd.DataFrame], path: str) -> None:
 
 
 def _write_sheet(ws, df: pd.DataFrame) -> None:
-    """Write a DataFrame to an openpyxl worksheet with formatting."""
+    """Write a DataFrame to an openpyxl worksheet with formatting.
+
+    Alternating row shading is applied via an Excel Table (one XML entry)
+    rather than a per-cell fill loop.  For a 50 000-row merged sheet this
+    reduces formatting work from ~750 000 cell operations to essentially zero.
+    """
     if df.empty:
         ws.append(["(no data)"])
         return
 
-    # Header row
-    headers = list(df.columns)
-    ws.append(headers)
-    header_row = ws[1]
-    for cell in header_row:
-        cell.fill = HEADER_FILL
-        cell.font = HEADER_FONT
-        cell.alignment = HEADER_ALIGNMENT  # reuse pre-created object
+    headers  = list(df.columns)
+    n_cols   = len(headers)
 
-    # Freeze header
+    # Track max column widths alongside the write loop — avoids a second
+    # full scan of ws.columns after all data has been written.
+    col_widths = [len(str(h)) + 4 for h in headers]
+
+    # ── Header row ──────────────────────────────────────────────────────
+    ws.append(headers)
+    for cell in ws[1]:
+        cell.fill      = HEADER_FILL
+        cell.font      = HEADER_FONT
+        cell.alignment = HEADER_ALIGNMENT
+
     ws.freeze_panes = "A2"
 
-    # Pre-convert DataFrame to a list of row-lists once (avoids repeated
-    # namedtuple construction inside itertuples for large DataFrames).
-    # Using df.to_numpy(dtype=object) preserves mixed types correctly.
+    # ── Data rows ────────────────────────────────────────────────────────
+    # Convert to plain Python lists once (faster than itertuples for large DFs).
     data_rows = df.to_numpy(dtype=object).tolist()
 
-    # Data rows with alternating shading.
-    # CELL_ALIGNMENT is a module-level constant — reusing it avoids
-    # allocating a new Alignment object for every cell (can be millions).
-    for row_idx, row_values in enumerate(data_rows, start=2):
+    for row_values in data_rows:
         ws.append(row_values)
-        fill = ROW_FILL_EVEN if row_idx % 2 == 0 else ROW_FILL_ODD
-        for cell in ws[row_idx]:
-            cell.fill = fill
-            cell.alignment = CELL_ALIGNMENT  # reuse pre-created object
+        # Update column width estimates while we already have the row in memory
+        for i, val in enumerate(row_values):
+            if val is not None:
+                w = len(str(val)) + 4
+                if w > col_widths[i]:
+                    col_widths[i] = w
 
-    # Auto column width
-    for col_idx, col_cells in enumerate(ws.columns, start=1):
-        max_len = max(
-            (len(str(cell.value)) for cell in col_cells if cell.value is not None),
-            default=8,
-        )
-        adjusted = min(max_len + 4, 60)  # cap at 60 chars
-        ws.column_dimensions[get_column_letter(col_idx)].width = adjusted
+    # ── Column widths ────────────────────────────────────────────────────
+    for col_idx, width in enumerate(col_widths, start=1):
+        ws.column_dimensions[get_column_letter(col_idx)].width = min(width, 60)
+
+    # ── Alternating row shading via Excel Table ───────────────────────────
+    # A single Table entry in the workbook XML replaces the old O(rows × cols)
+    # per-cell PatternFill loop.  Excel renders the stripe pattern natively.
+    # Table names must be unique across all sheets in the workbook.
+    last_col  = get_column_letter(n_cols)
+    last_row  = len(df) + 1          # +1 for the header row
+    table_ref = f"A1:{last_col}{last_row}"
+    safe_name = "Tbl_" + "".join(c if c.isalnum() else "_" for c in ws.title)
+
+    tbl = Table(displayName=safe_name, ref=table_ref)
+    tbl.tableStyleInfo = TableStyleInfo(
+        name="TableStyleMedium9",   # blue header + light-blue / white stripes
+        showFirstColumn=False,
+        showLastColumn=False,
+        showRowStripes=True,
+        showColumnStripes=False,
+    )
+    ws.add_table(tbl)
