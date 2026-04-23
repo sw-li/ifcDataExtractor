@@ -94,7 +94,7 @@ class IFCExtractorApp(ctk.CTk):
         right = ctk.CTkFrame(self, fg_color="transparent")
         right.grid(row=1, column=1, sticky="nsew", padx=(6, 12), pady=(0, 12))
         right.grid_columnconfigure(0, weight=1)
-        right.grid_rowconfigure(5, weight=1)  # log row expands
+        # row weight for the log textbox is set dynamically inside _build_right
 
         self._build_right(right)
 
@@ -488,4 +488,13 @@ class IFCExtractorApp(ctk.CTk):
 
     # ══════════════════════════════════════════════════════════════════
     # Log
-    # ═════�
+    # ══════════════════════════════════════════════════════════════════
+
+    def _log_msg(self, msg: str):
+        """Append a line to the log textbox (safe to call from any thread)."""
+        def _append():
+            self._log.configure(state="normal")
+            self._log.insert("end", msg + "\n")
+            self._log.see("end")
+            self._log.configure(state="disabled")
+        self.after(0, _append)
