@@ -39,7 +39,10 @@ def apply_filters(
     """
     result = {}
     for sheet_name, df in dfs.items():
-        filtered = df.copy()
+        # Start with the original reference — no copy needed.
+        # _filter_by_column returns a new DataFrame via boolean indexing
+        # only when filtering is actually applied, so this is safe.
+        filtered = df
 
         if ifc_types:
             filtered = _filter_by_column(filtered, "element_ifc_type", ifc_types)

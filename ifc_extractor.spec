@@ -8,7 +8,7 @@
 import sys
 import os
 import sysconfig
-from PyInstaller.utils.hooks import collect_all, collect_submodules
+from PyInstaller.utils.hooks import collect_all, collect_submodules, collect_data_files
 
 # ---------------------------------------------------------------------------
 # Locate ifcopenshell manually — collect_all can fail when the package
@@ -42,6 +42,25 @@ else:
 # openpyxl has a built-in hook in _pyinstaller_hooks_contrib, so collect_all works fine
 openpyxl_datas, openpyxl_binaries, openpyxl_hiddenimports = collect_all("openpyxl")
 
+# customtkinter ships image assets and themes that MUST be bundled as data.
+# collect_all can silently skip these when customtkinter isn't recognised as a
+# package (seen with some Python/PyInstaller version combos), so we walk the
+# directory manually — the same strategy used above for ifcopenshell.
+ctk_dir = _find_package_dir("customtkinter")
+if ctk_dir:
+    ctk_datas = []
+    for root, dirs, files in os.walk(ctk_dir):
+        dest = os.path.relpath(root, os.path.dirname(ctk_dir))
+        for f in files:
+            ctk_datas.append((os.path.join(root, f), dest))
+    ctk_binaries = []
+    print(f"[spec] Found customtkinter at: {ctk_dir} ({len(ctk_datas)} files collected)")
+else:
+    # Fall back to collect_all if directory walk fails
+    ctk_datas, ctk_binaries, _ = collect_all("customtkinter")
+    print("[spec] customtkinter directory not found — using collect_all fallback")
+ctk_hiddenimports = collect_submodules("customtkinter")
+
 # ---------------------------------------------------------------------------
 # Analysis
 # ---------------------------------------------------------------------------
@@ -49,12 +68,14 @@ openpyxl_datas, openpyxl_binaries, openpyxl_hiddenimports = collect_all("openpyx
 a = Analysis(
     ["main.py"],
     pathex=["."],
-    binaries=ifc_binaries + openpyxl_binaries,
-    datas=ifc_datas + openpyxl_datas,
+    binaries=ifc_binaries + openpyxl_binaries + ctk_binaries,
+    datas=ifc_datas + openpyxl_datas + ctk_datas,
     hiddenimports=(
         collect_submodules("ifcopenshell")
         + openpyxl_hiddenimports
         + collect_submodules("openpyxl")
+        + ctk_hiddenimports
+        + collect_submodules("customtkinter")
         + [
             "extractor.metadata",
             "extractor.hierarchy",
