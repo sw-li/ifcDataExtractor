@@ -59,7 +59,3 @@ Name: "{group}\{#AppName}";        Filename: "{app}\{#AppExeName}"
 Name: "{autodesktop}\{#AppName}";  Filename: "{app}\{#AppExeName}"; Tasks: desktopicon
 ; Uninstall entry in Start Menu
 Name: "{group}\Uninstall {#AppName}"; Filename: "{uninstallexe}"
-
-[Run]
-; Offer to launch the app immediately after install
-Filename: "{app}\{#AppExeName}";

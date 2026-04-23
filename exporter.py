@@ -121,16 +121,34 @@ def export_merged(
 # Internal helpers
 # ---------------------------------------------------------------------------
 
+_EXCEL_ROW_LIMIT = 1_048_575  # max data rows per sheet (Excel cap is 1 048 576 incl. header)
+
+
 def _write_workbook(dfs: dict[str, pd.DataFrame], path: str) -> None:
-    """Write a dict of DataFrames to an .xlsx workbook, one sheet each."""
+    """Write a dict of DataFrames to an .xlsx workbook, one sheet each.
+
+    If a DataFrame exceeds _EXCEL_ROW_LIMIT rows it is split across multiple
+    sheets named "SheetName (1)", "SheetName (2)", etc. so no data is lost.
+    """
     wb = openpyxl.Workbook()
     wb.remove(wb.active)  # remove default empty sheet
 
     sheet_order = ["Metadata", "Hierarchy", "Psets", "Quantities"]
     for sheet_name in sheet_order:
         df = dfs.get(sheet_name, pd.DataFrame())
-        ws = wb.create_sheet(title=sheet_name)
-        _write_sheet(ws, df)
+
+        if len(df) <= _EXCEL_ROW_LIMIT:
+            ws = wb.create_sheet(title=sheet_name)
+            _write_sheet(ws, df)
+        else:
+            # Split into numbered chunks
+            chunks = range(0, len(df), _EXCEL_ROW_LIMIT)
+            total  = len(chunks)
+            for part, start in enumerate(chunks, start=1):
+                chunk = df.iloc[start : start + _EXCEL_ROW_LIMIT]
+                title = f"{sheet_name} ({part})" if total > 1 else sheet_name
+                ws = wb.create_sheet(title=title)
+                _write_sheet(ws, chunk)
 
     wb.save(path)
 
