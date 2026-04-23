@@ -33,6 +33,7 @@ OutputDir=installer
 OutputBaseFilename=IFC_Extractor_Setup
 Compression=lzma2/ultra64
 SetupIconFile=icon.ico
+UninstallDisplayIcon={app}\{#AppExeName}
 SolidCompression=yes
 WizardStyle=modern
 ; Require normal user rights — no admin needed to install to user AppData
@@ -61,4 +62,4 @@ Name: "{group}\Uninstall {#AppName}"; Filename: "{uninstallexe}"
 
 [Run]
 ; Offer to launch the app immediately after install
-Filename: "{app}\{#AppExeName}"; Description: "{cm:LaunchProgram,{#AppName}}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#AppExeName}";

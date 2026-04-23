@@ -123,18 +123,9 @@ exe = EXE(
     console=False,              # set True temporarily to see crash errors
     disable_windowed_traceback=False,
     argv_emulation=False,
-    icon="icon.ico",                  # replace with "icon.ico" if you have one
+    icon="icon.ico",
 )
 
 # ---------------------------------------------------------------------------
 # COLLECT  — assembles the final dist\IFC Extractor\ folder
-# ---------------------------------------------------------------------------
-coll = COLLECT(
-    exe,
-    a.binaries,
-    a.datas,
-    strip=False,
-    upx=True,
-    upx_exclude=[],
-    name="IFC Extractor",
-)
+# -------------------------------------------------------------------------
