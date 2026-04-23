@@ -30,7 +30,10 @@ class IFCExtractorApp(ctk.CTk):
         # ── State ─────────────────────────────────────────────────────
         self._ifc_files: list[str] = []
         self._loaded_dfs: dict = {}
-        self._output_dir   = tk.StringVar(value=os.path.expanduser("~"))
+        _downloads = os.path.join(os.path.expanduser("~"), "Downloads")
+        self._output_dir   = tk.StringVar(
+            value=_downloads if os.path.isdir(_downloads) else os.path.expanduser("~")
+        )
         self._export_mode  = tk.StringVar(value="per_ifc")
 
         self._mod_metadata   = tk.BooleanVar(value=True)
@@ -40,6 +43,9 @@ class IFCExtractorApp(ctk.CTk):
 
         self._type_vars:   dict[str, tk.BooleanVar] = {}
         self._storey_vars: dict[str, tk.BooleanVar] = {}
+
+        # Cancellation signal — set by the Cancel button, polled by the load thread
+        self._cancel_event = threading.Event()
 
         self._build_ui()
 
@@ -88,7 +94,7 @@ class IFCExtractorApp(ctk.CTk):
         right = ctk.CTkFrame(self, fg_color="transparent")
         right.grid(row=1, column=1, sticky="nsew", padx=(6, 12), pady=(0, 12))
         right.grid_columnconfigure(0, weight=1)
-        right.grid_rowconfigure(5, weight=1)  # log row expands
+        # row weight for the log textbox is set dynamically inside _build_right
 
         self._build_right(right)
 
@@ -201,8 +207,18 @@ class IFCExtractorApp(ctk.CTk):
 
         # Progress bar
         self._progress = ctk.CTkProgressBar(parent, mode="indeterminate", height=8)
-        self._progress.grid(row=r, column=0, sticky="ew", pady=(0, 10)); r += 1
+        self._progress.grid(row=r, column=0, sticky="ew", pady=(0, 4)); r += 1
         self._progress.set(0)
+
+        # Cancel button — hidden until a load is running
+        self._cancel_btn = ctk.CTkButton(
+            parent, text="⏹  Cancel",
+            height=28, font=ctk.CTkFont(size=12),
+            fg_color="gray35", hover_color="gray25",
+            command=self._cancel_load,
+        )
+        self._cancel_btn.grid(row=r, column=0, sticky="ew", pady=(0, 6)); r += 1
+        self._cancel_btn.grid_remove()   # hidden by default
 
         # Log
         self._lbl(parent, r, "📋  Log"); r += 1
@@ -302,8 +318,14 @@ class IFCExtractorApp(ctk.CTk):
         self._log_msg("Loading files…")
         self._loaded_dfs.clear()
         total_elements = 0
+        cancelled = False
 
         for path in self._ifc_files:
+            # ── Check for cancellation before starting each file ──────
+            if self._cancel_event.is_set():
+                cancelled = True
+                break
+
             name = os.path.basename(path)
             try:
                 self._log_msg(f"  Opening {name}…")
@@ -311,9 +333,9 @@ class IFCExtractorApp(ctk.CTk):
                 dfs = {}
 
                 if self._mod_metadata.get():
-                    dfs["Metadata"] = metadata.extract(ifc, name)
+                    dfs["Metadata"] = metadata.extract(ifc, name, source_filepath=path)
 
-                if self._mod_hierarchy.get():
+                if not self._cancel_event.is_set() and self._mod_hierarchy.get():
                     self._log_msg("  Extracting hierarchy…")
                     dfs["Hierarchy"] = hierarchy.extract(
                         ifc, name, progress_callback=self._log_msg
@@ -321,13 +343,13 @@ class IFCExtractorApp(ctk.CTk):
                     if not dfs["Hierarchy"].empty:
                         total_elements += len(dfs["Hierarchy"])
 
-                if self._mod_psets.get():
+                if not self._cancel_event.is_set() and self._mod_psets.get():
                     self._log_msg("  Extracting property sets…")
                     dfs["Psets"] = psets.extract(
                         ifc, name, progress_callback=self._log_msg
                     )
 
-                if self._mod_quantities.get():
+                if not self._cancel_event.is_set() and self._mod_quantities.get():
                     self._log_msg("  Extracting quantities…")
                     dfs["Quantities"] = quantities.extract(
                         ifc, name, progress_callback=self._log_msg
@@ -339,13 +361,21 @@ class IFCExtractorApp(ctk.CTk):
             except Exception as exc:
                 self._log_msg(f"  ✗ Error loading {name}: {exc}")
 
+        # ── Build filters from whatever was loaded ────────────────────
         all_flat = {k: df
                     for src in self._loaded_dfs.values()
                     for k, df in src.items()}
         ifc_types = get_unique_ifc_types(all_flat)
         storeys   = get_unique_storeys(all_flat)
-        summary   = (f"Ready — {len(self._loaded_dfs)} file(s), "
-                     f"{total_elements:,} hierarchy rows")
+
+        if cancelled:
+            summary = (f"Cancelled — {len(self._loaded_dfs)} of "
+                       f"{len(self._ifc_files)} file(s) loaded, "
+                       f"{total_elements:,} hierarchy rows")
+        else:
+            summary = (f"Ready — {len(self._loaded_dfs)} file(s), "
+                       f"{total_elements:,} hierarchy rows")
+
         self.after(0, lambda: self._on_load_done(ifc_types, storeys, summary))
 
     def _on_load_done(self, ifc_types, storeys, summary):
@@ -437,20 +467,31 @@ class IFCExtractorApp(ctk.CTk):
 
     def _set_busy(self, busy: bool):
         if busy:
+            self._cancel_event.clear()
             self._run_btn.configure(state="disabled")
+            self._cancel_btn.configure(state="normal", text="⏹  Cancel")
+            self._cancel_btn.grid()          # show
             self._progress.configure(mode="indeterminate")
             self._progress.start()
         else:
             self._progress.stop()
             self._progress.configure(mode="determinate")
             self._progress.set(1)
+            self._cancel_btn.grid_remove()   # hide
             self._run_btn.configure(state="normal")
+
+    def _cancel_load(self):
+        """Signal the running load thread to stop after its current operation."""
+        self._cancel_event.set()
+        self._cancel_btn.configure(state="disabled", text="Cancelling…")
+        self._log_msg("  ⏹  Cancel requested — stopping after current step…")
 
     # ══════════════════════════════════════════════════════════════════
     # Log
     # ══════════════════════════════════════════════════════════════════
 
     def _log_msg(self, msg: str):
+        """Append a line to the log textbox (safe to call from any thread)."""
         def _append():
             self._log.configure(state="normal")
             self._log.insert("end", msg + "\n")

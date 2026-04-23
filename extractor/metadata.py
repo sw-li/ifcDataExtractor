@@ -11,6 +11,7 @@ Georeferencing sources (works for both IFC2X3 and IFC4):
 Returns a one-row DataFrame per file (suitable for a summary sheet).
 """
 
+import os
 import pandas as pd
 import ifcopenshell
 
@@ -18,7 +19,8 @@ import ifcopenshell
 def extract(
     ifc_file: ifcopenshell.file,
     source_filename: str = "",
-    progress_callback=None,   # accepted for API consistency; metadata is fast
+    progress_callback=None,    # accepted for API consistency; metadata is fast
+    source_filepath: str = "", # full path used to compute file size
 ) -> pd.DataFrame:
     """
     Extract project metadata and georeferencing from an open IFC file.
@@ -27,13 +29,16 @@ def extract(
     ----------
     ifc_file : ifcopenshell.file
     source_filename : str
+    source_filepath : str
+        Full path to the IFC file on disk; used to read the file size.
+        If omitted, file_size will be empty.
 
     Returns
     -------
     pd.DataFrame  — one row with all metadata + georeference fields.
     """
     # ── File header ───────────────────────────────────────────────────
-    file_name_header = ifc_file.header.file_name
+    file_name_header   = ifc_file.header.file_name
     timestamp          = getattr(file_name_header, "time_stamp", "") or ""
     author             = ", ".join(getattr(file_name_header, "author", []) or [])
     organization       = ", ".join(getattr(file_name_header, "organization", []) or [])
@@ -52,10 +57,10 @@ def extract(
     sites = ifc_file.by_type("IfcSite")
     site  = sites[0] if sites else None
 
-    site_name      = getattr(site, "Name", "")      or ""
-    site_latitude  = _compound_angle(getattr(site, "RefLatitude",  None))
-    site_longitude = _compound_angle(getattr(site, "RefLongitude", None))
-    site_elevation = getattr(site, "RefElevation", None)
+    site_name       = getattr(site, "Name", "")      or ""
+    site_latitude   = _compound_angle(getattr(site, "RefLatitude",  None))
+    site_longitude  = _compound_angle(getattr(site, "RefLongitude", None))
+    site_elevation  = getattr(site, "RefElevation", None)
     site_land_title = getattr(site, "LandTitleNumber", "") or ""
 
     # ── True North (from IfcGeometricRepresentationContext) ───────────
@@ -68,6 +73,7 @@ def extract(
     row = {
         # File / project
         "source_file":         source_filename,
+        "file_size":           _format_file_size(source_filepath),
         "schema_version":      ifc_file.schema,
         "timestamp":           timestamp,
         "author":              author,
@@ -106,6 +112,21 @@ def extract(
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _format_file_size(filepath: str) -> str:
+    """Return a human-readable file size string (e.g. '45.2 MB')."""
+    if not filepath:
+        return ""
+    try:
+        size = os.path.getsize(filepath)
+        for unit in ("B", "KB", "MB", "GB"):
+            if size < 1024:
+                return f"{size:.1f} {unit}"
+            size /= 1024
+        return f"{size:.1f} TB"
+    except Exception:
+        return ""
+
 
 def _compound_angle(value) -> float | None:
     """
@@ -155,9 +176,8 @@ def _extract_true_north(ifc_file: ifcopenshell.file) -> float | None:
             continue
         dirs = getattr(tn, "DirectionRatios", None)
         if dirs and len(dirs) >= 2:
-            # DirectionRatios = (X, Y) of the true-north vector
             x, y = float(dirs[0]), float(dirs[1])
-            angle_rad = math.atan2(x, y)          # angle from Y-axis
+            angle_rad = math.atan2(x, y)   # angle from Y-axis
             angle_deg = math.degrees(angle_rad)
             return round(angle_deg, 4)
     return None

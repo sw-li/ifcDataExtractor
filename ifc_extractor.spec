@@ -1,5 +1,15 @@
-# ifc_extractor.spec
+# ifc_extractor.spec  —  ONE-FOLDER build (used by the installer workflow)
+#
 # Build with:  pyinstaller ifc_extractor.spec --clean
+#
+# This produces dist\IFC Extractor\ (a folder, not a single exe).
+# The installer script (installer.iss) then wraps that folder into a proper
+# Windows setup wizard.
+#
+# Why one-folder instead of one-file?
+#   One-file unpacks itself to a temp directory on every launch, causing a
+#   10-20 s delay before the window appears.  One-folder installs the files
+#   permanently to Program Files so the app opens instantly every time.
 #
 # Before building:
 #   - Make sure "IFC Extractor.exe" is NOT running (taskkill /f /im "IFC Extractor.exe")
@@ -7,12 +17,11 @@
 
 import sys
 import os
-import sysconfig
-from PyInstaller.utils.hooks import collect_all, collect_submodules, collect_data_files
+from PyInstaller.utils.hooks import collect_all, collect_submodules
 
 # ---------------------------------------------------------------------------
-# Locate ifcopenshell manually — collect_all can fail when the package
-# is installed as a compiled extension or in a non-standard layout.
+# Locate packages manually — collect_all can fail when a package is installed
+# as a compiled extension or in a non-standard layout.
 # ---------------------------------------------------------------------------
 
 def _find_package_dir(name):
@@ -23,42 +32,39 @@ def _find_package_dir(name):
             return candidate
     return None
 
-ifc_dir = _find_package_dir("ifcopenshell")
 
-if ifc_dir:
-    # Walk the entire ifcopenshell folder and include every file as data
-    ifc_datas = []
-    for root, dirs, files in os.walk(ifc_dir):
-        dest = os.path.relpath(root, os.path.dirname(ifc_dir))
+def _walk_package(pkg_dir):
+    """Walk a package directory and return (src, dest) pairs for all files."""
+    datas = []
+    for root, dirs, files in os.walk(pkg_dir):
+        dest = os.path.relpath(root, os.path.dirname(pkg_dir))
         for f in files:
-            ifc_datas.append((os.path.join(root, f), dest))
-    ifc_binaries = []
-    print(f"[spec] Found ifcopenshell at: {ifc_dir} ({len(ifc_datas)} files collected)")
-else:
-    # Fall back to collect_all
-    ifc_datas, ifc_binaries, _ = collect_all("ifcopenshell")
-    print("[spec] ifcopenshell directory not found — using collect_all fallback")
+            datas.append((os.path.join(root, f), dest))
+    return datas
 
-# openpyxl has a built-in hook in _pyinstaller_hooks_contrib, so collect_all works fine
+
+# ── ifcopenshell ─────────────────────────────────────────────────────────────
+ifc_dir = _find_package_dir("ifcopenshell")
+if ifc_dir:
+    ifc_datas    = _walk_package(ifc_dir)
+    ifc_binaries = []
+    print(f"[spec] ifcopenshell: {ifc_dir} ({len(ifc_datas)} files)")
+else:
+    ifc_datas, ifc_binaries, _ = collect_all("ifcopenshell")
+    print("[spec] ifcopenshell: collect_all fallback")
+
+# ── openpyxl ─────────────────────────────────────────────────────────────────
 openpyxl_datas, openpyxl_binaries, openpyxl_hiddenimports = collect_all("openpyxl")
 
-# customtkinter ships image assets and themes that MUST be bundled as data.
-# collect_all can silently skip these when customtkinter isn't recognised as a
-# package (seen with some Python/PyInstaller version combos), so we walk the
-# directory manually — the same strategy used above for ifcopenshell.
+# ── customtkinter ─────────────────────────────────────────────────────────────
 ctk_dir = _find_package_dir("customtkinter")
 if ctk_dir:
-    ctk_datas = []
-    for root, dirs, files in os.walk(ctk_dir):
-        dest = os.path.relpath(root, os.path.dirname(ctk_dir))
-        for f in files:
-            ctk_datas.append((os.path.join(root, f), dest))
+    ctk_datas    = _walk_package(ctk_dir)
     ctk_binaries = []
-    print(f"[spec] Found customtkinter at: {ctk_dir} ({len(ctk_datas)} files collected)")
+    print(f"[spec] customtkinter: {ctk_dir} ({len(ctk_datas)} files)")
 else:
-    # Fall back to collect_all if directory walk fails
     ctk_datas, ctk_binaries, _ = collect_all("customtkinter")
-    print("[spec] customtkinter directory not found — using collect_all fallback")
+    print("[spec] customtkinter: collect_all fallback")
 ctk_hiddenimports = collect_submodules("customtkinter")
 
 # ---------------------------------------------------------------------------
@@ -84,7 +90,6 @@ a = Analysis(
             "filter",
             "exporter",
             "ui.app",
-            # Common ifcopenshell internals that may not be auto-detected
             "ifcopenshell.util",
             "ifcopenshell.util.element",
             "ifcopenshell.util.unit",
@@ -101,21 +106,35 @@ a = Analysis(
 
 pyz = PYZ(a.pure)
 
+# ---------------------------------------------------------------------------
+# EXE  — note: binaries and datas are NOT embedded here (they go into COLLECT)
+# ---------------------------------------------------------------------------
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.datas,
-    [],
+    [],                         # binaries go into COLLECT, not EXE
+    exclude_binaries=True,      # required for one-folder mode
     name="IFC Extractor",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
     upx_exclude=[],
-    runtime_tmpdir=None,
-    console=False,        # set True temporarily if you need to see crash errors
+    console=False,              # set True temporarily to see crash errors
     disable_windowed_traceback=False,
     argv_emulation=False,
-    icon=None,            # replace with "icon.ico" if you have one
+    icon=None,                  # replace with "icon.ico" if you have one
+)
+
+# ---------------------------------------------------------------------------
+# COLLECT  — assembles the final dist\IFC Extractor\ folder
+# ---------------------------------------------------------------------------
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.datas,
+    strip=False,
+    upx=True,
+    upx_exclude=[],
+    name="IFC Extractor",
 )
