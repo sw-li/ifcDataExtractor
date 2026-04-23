@@ -1,46 +1,55 @@
 """
-ui/app.py — Main Tkinter window for IFC Extractor.
+ui/app.py — IFC Extractor UI (CustomTkinter)
 
-Layout:
-  1. File list  — Add Files / Clear
-  2. Modules    — Metadata | Hierarchy | Psets | Quantities (checkboxes)
-  3. Filters    — IFC type (multi-select) | Storey (multi-select)
-              populated dynamically after files are loaded
-  4. Export     — Per IFC / Merged radio + output folder picker
-  5. Run button
-  6. Log area   — scrolled text widget
+Features:
+  - Modern dark / light mode with toggle switch
+  - File list with Add / Clear / Load and a file-count badge
+  - Module checkboxes (Metadata, Hierarchy, Psets, Quantities)
+  - Filter panels with Select All / None buttons
+  - Animated progress bar during extraction
+  - Scrollable log area
 """
 
 import os
 import threading
 import tkinter as tk
-from tkinter import ttk, filedialog, scrolledtext
 
+import customtkinter as ctk
 import ifcopenshell
 
 from extractor import metadata, hierarchy, psets, quantities
 from filter import apply_filters, get_unique_ifc_types, get_unique_storeys
 import exporter
 
+# ---------------------------------------------------------------------------
+# Default appearance
+# ---------------------------------------------------------------------------
+ctk.set_appearance_mode("dark")
+ctk.set_default_color_theme("blue")
 
-class IFCExtractorApp(tk.Tk):
+
+class IFCExtractorApp(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.title("IFC Extractor")
-        self.resizable(True, True)
-        self.minsize(600, 700)
+        self.geometry("720x860")
+        self.minsize(640, 760)
 
-        # Internal state
+        # State
         self._ifc_files: list[str] = []
-        self._loaded_dfs: dict[str, dict[str, object]] = {}   # source → sheet → df
+        self._loaded_dfs: dict = {}
         self._output_dir = tk.StringVar(value=os.path.expanduser("~"))
         self._export_mode = tk.StringVar(value="per_ifc")
 
         # Module toggles
-        self._mod_metadata = tk.BooleanVar(value=True)
-        self._mod_hierarchy = tk.BooleanVar(value=True)
-        self._mod_psets = tk.BooleanVar(value=True)
+        self._mod_metadata   = tk.BooleanVar(value=True)
+        self._mod_hierarchy  = tk.BooleanVar(value=True)
+        self._mod_psets      = tk.BooleanVar(value=True)
         self._mod_quantities = tk.BooleanVar(value=True)
+
+        # Filter checkbox state (populated dynamically)
+        self._type_vars:   dict[str, tk.BooleanVar] = {}
+        self._storey_vars: dict[str, tk.BooleanVar] = {}
 
         self._build_ui()
 
@@ -49,90 +58,213 @@ class IFCExtractorApp(tk.Tk):
     # ------------------------------------------------------------------
 
     def _build_ui(self):
-        pad = {"padx": 8, "pady": 4}
+        self.grid_columnconfigure(0, weight=1)
+        row = 0
 
-        # ── Section 1: File List ──────────────────────────────────────
-        frm_files = ttk.LabelFrame(self, text="IFC Files")
-        frm_files.pack(fill="x", **pad)
+        # ── Top bar: title + dark/light toggle ───────────────────────
+        top = ctk.CTkFrame(self, fg_color="transparent")
+        top.grid(row=row, column=0, sticky="ew", padx=16, pady=(14, 2))
+        top.grid_columnconfigure(0, weight=1)
+        row += 1
 
-        btn_row = ttk.Frame(frm_files)
-        btn_row.pack(fill="x", padx=4, pady=2)
-        ttk.Button(btn_row, text="Add Files", command=self._add_files).pack(side="left", padx=2)
-        ttk.Button(btn_row, text="Clear", command=self._clear_files).pack(side="left", padx=2)
-        ttk.Button(btn_row, text="Load Files", command=self._load_files).pack(side="left", padx=2)
+        ctk.CTkLabel(top, text="IFC Extractor",
+                     font=ctk.CTkFont(size=20, weight="bold")).grid(
+            row=0, column=0, sticky="w")
 
-        self._file_listbox = tk.Listbox(frm_files, height=5, selectmode=tk.EXTENDED)
-        self._file_listbox.pack(fill="x", padx=4, pady=2)
+        mode_frame = ctk.CTkFrame(top, fg_color="transparent")
+        mode_frame.grid(row=0, column=1, sticky="e")
+        ctk.CTkLabel(mode_frame, text="🌙", font=ctk.CTkFont(size=14)).pack(side="left", padx=(0, 4))
+        self._theme_switch = ctk.CTkSwitch(
+            mode_frame, text="", width=46,
+            command=self._toggle_theme,
+            onvalue="light", offvalue="dark",
+        )
+        self._theme_switch.pack(side="left")
+        ctk.CTkLabel(mode_frame, text="☀️", font=ctk.CTkFont(size=14)).pack(side="left", padx=(4, 0))
+
+        # ── Section 1: Files ─────────────────────────────────────────
+        row = self._section(row, "📂  IFC Files")
+
+        btn_row = ctk.CTkFrame(self, fg_color="transparent")
+        btn_row.grid(row=row, column=0, sticky="ew", padx=16, pady=(0, 4))
+        row += 1
+
+        ctk.CTkButton(btn_row, text="Add Files", width=100,
+                      command=self._add_files).pack(side="left", padx=(0, 6))
+        ctk.CTkButton(btn_row, text="Clear", width=80, fg_color="gray40",
+                      hover_color="gray30",
+                      command=self._clear_files).pack(side="left", padx=(0, 6))
+        ctk.CTkButton(btn_row, text="Load Files ▶", width=110,
+                      command=self._load_files).pack(side="left")
+        self._file_badge = ctk.CTkLabel(btn_row, text="",
+                                         font=ctk.CTkFont(size=12),
+                                         text_color="gray60")
+        self._file_badge.pack(side="left", padx=10)
+
+        # File listbox (plain tk inside a CTkFrame for scrolling)
+        file_frame = ctk.CTkFrame(self)
+        file_frame.grid(row=row, column=0, sticky="ew", padx=16, pady=(0, 8))
+        file_frame.grid_columnconfigure(0, weight=1)
+        row += 1
+
+        self._file_listbox = tk.Listbox(
+            file_frame, height=4, selectmode=tk.EXTENDED,
+            bg="#2b2b2b", fg="white", selectbackground="#1f6aa5",
+            relief="flat", borderwidth=0, font=("Segoe UI", 10),
+        )
+        sb = tk.Scrollbar(file_frame, orient="vertical",
+                          command=self._file_listbox.yview)
+        self._file_listbox.configure(yscrollcommand=sb.set)
+        self._file_listbox.grid(row=0, column=0, sticky="ew", padx=(6, 0), pady=4)
+        sb.grid(row=0, column=1, sticky="ns", pady=4)
 
         # ── Section 2: Modules ────────────────────────────────────────
-        frm_modules = ttk.LabelFrame(self, text="Modules to extract")
-        frm_modules.pack(fill="x", **pad)
+        row = self._section(row, "⚙️  Modules to extract")
 
-        row1 = ttk.Frame(frm_modules)
-        row1.pack(fill="x", padx=4, pady=2)
-        ttk.Checkbutton(row1, text="Metadata",   variable=self._mod_metadata).pack(side="left", padx=8)
-        ttk.Checkbutton(row1, text="Hierarchy",  variable=self._mod_hierarchy).pack(side="left", padx=8)
-        ttk.Checkbutton(row1, text="Psets",      variable=self._mod_psets).pack(side="left", padx=8)
-        ttk.Checkbutton(row1, text="Quantities", variable=self._mod_quantities).pack(side="left", padx=8)
+        mod_row = ctk.CTkFrame(self, fg_color="transparent")
+        mod_row.grid(row=row, column=0, sticky="ew", padx=16, pady=(0, 8))
+        row += 1
+
+        for text, var in [
+            ("Metadata",   self._mod_metadata),
+            ("Hierarchy",  self._mod_hierarchy),
+            ("Psets",      self._mod_psets),
+            ("Quantities", self._mod_quantities),
+        ]:
+            ctk.CTkCheckBox(mod_row, text=text, variable=var,
+                            font=ctk.CTkFont(size=13)).pack(side="left", padx=10)
 
         # ── Section 3: Filters ────────────────────────────────────────
-        frm_filters = ttk.LabelFrame(self, text="Filters  (populated after loading files)")
-        frm_filters.pack(fill="x", **pad)
+        row = self._section(row, "🔍  Filters  (populated after Load Files)")
 
-        # IFC type filter
-        type_row = ttk.Frame(frm_filters)
-        type_row.pack(fill="x", padx=4, pady=2)
-        ttk.Label(type_row, text="IFC type:", width=12).pack(side="left")
-        self._type_listbox = tk.Listbox(type_row, selectmode=tk.MULTIPLE, height=4, exportselection=False)
-        type_scroll = ttk.Scrollbar(type_row, orient="vertical", command=self._type_listbox.yview)
-        self._type_listbox.configure(yscrollcommand=type_scroll.set)
-        self._type_listbox.pack(side="left", fill="x", expand=True)
-        type_scroll.pack(side="left", fill="y")
+        filters_outer = ctk.CTkFrame(self, fg_color="transparent")
+        filters_outer.grid(row=row, column=0, sticky="ew", padx=16, pady=(0, 8))
+        filters_outer.grid_columnconfigure((0, 1), weight=1)
+        row += 1
 
-        # Storey filter
-        storey_row = ttk.Frame(frm_filters)
-        storey_row.pack(fill="x", padx=4, pady=2)
-        ttk.Label(storey_row, text="Storey:", width=12).pack(side="left")
-        self._storey_listbox = tk.Listbox(storey_row, selectmode=tk.MULTIPLE, height=4, exportselection=False)
-        storey_scroll = ttk.Scrollbar(storey_row, orient="vertical", command=self._storey_listbox.yview)
-        self._storey_listbox.configure(yscrollcommand=storey_scroll.set)
-        self._storey_listbox.pack(side="left", fill="x", expand=True)
-        storey_scroll.pack(side="left", fill="y")
+        # IFC Type panel
+        self._type_panel = self._filter_panel(
+            filters_outer, "IFC Type", col=0,
+            select_all_cmd=lambda: self._select_all(self._type_vars),
+            select_none_cmd=lambda: self._select_none(self._type_vars),
+        )
 
-        ttk.Label(frm_filters, text="(Leave all unselected to export everything)", foreground="grey").pack(anchor="w", padx=4)
+        # Storey panel
+        self._storey_panel = self._filter_panel(
+            filters_outer, "Storey", col=1,
+            select_all_cmd=lambda: self._select_all(self._storey_vars),
+            select_none_cmd=lambda: self._select_none(self._storey_vars),
+        )
+
+        ctk.CTkLabel(self,
+                     text="Leave all unchecked to export everything",
+                     font=ctk.CTkFont(size=11), text_color="gray55"
+                     ).grid(row=row, column=0, sticky="w", padx=18, pady=(0, 4))
+        row += 1
 
         # ── Section 4: Export ─────────────────────────────────────────
-        frm_export = ttk.LabelFrame(self, text="Export")
-        frm_export.pack(fill="x", **pad)
+        row = self._section(row, "💾  Export")
 
-        mode_row = ttk.Frame(frm_export)
-        mode_row.pack(fill="x", padx=4, pady=2)
-        ttk.Radiobutton(mode_row, text="Per IFC", variable=self._export_mode, value="per_ifc").pack(side="left")
-        ttk.Radiobutton(mode_row, text="Merged",  variable=self._export_mode, value="merged").pack(side="left", padx=8)
+        export_frame = ctk.CTkFrame(self, fg_color="transparent")
+        export_frame.grid(row=row, column=0, sticky="ew", padx=16, pady=(0, 8))
+        row += 1
 
-        folder_row = ttk.Frame(frm_export)
-        folder_row.pack(fill="x", padx=4, pady=2)
-        ttk.Label(folder_row, text="Output folder:").pack(side="left")
-        ttk.Entry(folder_row, textvariable=self._output_dir, width=40).pack(side="left", padx=4)
-        ttk.Button(folder_row, text="Browse", command=self._browse_output).pack(side="left")
+        ctk.CTkRadioButton(export_frame, text="Per IFC file",
+                           variable=self._export_mode, value="per_ifc").pack(side="left")
+        ctk.CTkRadioButton(export_frame, text="Merged (one file)",
+                           variable=self._export_mode, value="merged").pack(side="left", padx=20)
 
-        # ── Section 5: Run ────────────────────────────────────────────
-        self._run_btn = ttk.Button(self, text="▶  Run Extraction", command=self._run)
-        self._run_btn.pack(pady=6)
+        folder_row = ctk.CTkFrame(self, fg_color="transparent")
+        folder_row.grid(row=row, column=0, sticky="ew", padx=16, pady=(0, 8))
+        folder_row.grid_columnconfigure(1, weight=1)
+        row += 1
 
-        # ── Section 6: Log ────────────────────────────────────────────
-        frm_log = ttk.LabelFrame(self, text="Log")
-        frm_log.pack(fill="both", expand=True, **pad)
+        ctk.CTkLabel(folder_row, text="Output folder:").grid(row=0, column=0, padx=(0, 8))
+        ctk.CTkEntry(folder_row, textvariable=self._output_dir).grid(
+            row=0, column=1, sticky="ew")
+        ctk.CTkButton(folder_row, text="Browse", width=80,
+                      command=self._browse_output).grid(row=0, column=2, padx=(8, 0))
 
-        self._log = scrolledtext.ScrolledText(frm_log, height=12, state="disabled",
-                                               font=("Consolas", 9))
-        self._log.pack(fill="both", expand=True, padx=4, pady=4)
+        # ── Run button ────────────────────────────────────────────────
+        self._run_btn = ctk.CTkButton(
+            self, text="▶   Run Extraction",
+            height=42, font=ctk.CTkFont(size=15, weight="bold"),
+            command=self._run,
+        )
+        self._run_btn.grid(row=row, column=0, padx=16, pady=6, sticky="ew")
+        row += 1
+
+        # ── Progress bar ──────────────────────────────────────────────
+        self._progress = ctk.CTkProgressBar(self, mode="indeterminate", height=8)
+        self._progress.grid(row=row, column=0, sticky="ew", padx=16, pady=(0, 6))
+        self._progress.set(0)
+        row += 1
+
+        # ── Log ───────────────────────────────────────────────────────
+        row = self._section(row, "📋  Log")
+        self._log = ctk.CTkTextbox(self, height=150,
+                                    font=ctk.CTkFont(family="Consolas", size=11),
+                                    state="disabled")
+        self._log.grid(row=row, column=0, sticky="nsew", padx=16, pady=(0, 12))
+        self.grid_rowconfigure(row, weight=1)
+
+    # ------------------------------------------------------------------
+    # Section header helper
+    # ------------------------------------------------------------------
+
+    def _section(self, row: int, title: str) -> int:
+        ctk.CTkLabel(self, text=title,
+                     font=ctk.CTkFont(size=13, weight="bold"),
+                     anchor="w").grid(row=row, column=0, sticky="ew",
+                                      padx=16, pady=(10, 2))
+        return row + 1
+
+    # ------------------------------------------------------------------
+    # Filter panel helper
+    # ------------------------------------------------------------------
+
+    def _filter_panel(self, parent, title, col,
+                      select_all_cmd, select_none_cmd):
+        frame = ctk.CTkFrame(parent)
+        frame.grid(row=0, column=col, sticky="nsew", padx=(0 if col else 0, 6 if col == 0 else 0))
+        frame.grid_columnconfigure(0, weight=1)
+
+        header = ctk.CTkFrame(frame, fg_color="transparent")
+        header.grid(row=0, column=0, sticky="ew", padx=6, pady=(6, 2))
+        ctk.CTkLabel(header, text=title,
+                     font=ctk.CTkFont(size=12, weight="bold")).pack(side="left")
+        ctk.CTkButton(header, text="All", width=36, height=22,
+                      font=ctk.CTkFont(size=11),
+                      command=select_all_cmd).pack(side="right", padx=(4, 0))
+        ctk.CTkButton(header, text="None", width=40, height=22,
+                      font=ctk.CTkFont(size=11), fg_color="gray40",
+                      hover_color="gray30",
+                      command=select_none_cmd).pack(side="right")
+
+        scroll = ctk.CTkScrollableFrame(frame, height=110)
+        scroll.grid(row=1, column=0, sticky="nsew", padx=6, pady=(0, 6))
+        frame.grid_rowconfigure(1, weight=1)
+
+        return scroll  # return scrollable area so we can populate it later
+
+    # ------------------------------------------------------------------
+    # Theme toggle
+    # ------------------------------------------------------------------
+
+    def _toggle_theme(self):
+        mode = self._theme_switch.get()
+        ctk.set_appearance_mode(mode)
+        # Keep listbox colours in sync
+        bg = "#2b2b2b" if mode == "dark" else "#ebebeb"
+        fg = "white"   if mode == "dark" else "black"
+        self._file_listbox.configure(bg=bg, fg=fg)
 
     # ------------------------------------------------------------------
     # File management
     # ------------------------------------------------------------------
 
     def _add_files(self):
+        from tkinter import filedialog
         paths = filedialog.askopenfilenames(
             title="Select IFC files",
             filetypes=[("IFC files", "*.ifc"), ("All files", "*.*")],
@@ -141,28 +273,37 @@ class IFCExtractorApp(tk.Tk):
             if p not in self._ifc_files:
                 self._ifc_files.append(p)
                 self._file_listbox.insert(tk.END, os.path.basename(p))
+        self._update_file_badge()
 
     def _clear_files(self):
         self._ifc_files.clear()
         self._file_listbox.delete(0, tk.END)
-        self._type_listbox.delete(0, tk.END)
-        self._storey_listbox.delete(0, tk.END)
         self._loaded_dfs.clear()
+        self._update_file_badge()
+        self._clear_filter_panel(self._type_panel, self._type_vars)
+        self._clear_filter_panel(self._storey_panel, self._storey_vars)
+
+    def _update_file_badge(self):
+        n = len(self._ifc_files)
+        self._file_badge.configure(
+            text=f"{n} file{'s' if n != 1 else ''} added" if n else ""
+        )
 
     # ------------------------------------------------------------------
-    # Load files (parse IFC, populate filters)
+    # Load files
     # ------------------------------------------------------------------
 
     def _load_files(self):
         if not self._ifc_files:
             self._log_msg("No files added. Use 'Add Files' first.")
             return
-        self._run_btn.config(state="disabled")
+        self._set_busy(True)
         threading.Thread(target=self._load_thread, daemon=True).start()
 
     def _load_thread(self):
         self._log_msg("Loading files…")
         self._loaded_dfs.clear()
+        total_elements = 0
 
         for path in self._ifc_files:
             name = os.path.basename(path)
@@ -173,12 +314,17 @@ class IFCExtractorApp(tk.Tk):
 
                 if self._mod_metadata.get():
                     dfs["Metadata"] = metadata.extract(ifc, name)
+
                 if self._mod_hierarchy.get():
                     self._log_msg(f"  Extracting hierarchy…")
                     dfs["Hierarchy"] = hierarchy.extract(ifc, name)
+                    if not dfs["Hierarchy"].empty:
+                        total_elements += len(dfs["Hierarchy"])
+
                 if self._mod_psets.get():
                     self._log_msg(f"  Extracting property sets…")
                     dfs["Psets"] = psets.extract(ifc, name)
+
                 if self._mod_quantities.get():
                     self._log_msg(f"  Extracting quantities…")
                     dfs["Quantities"] = quantities.extract(ifc, name)
@@ -189,29 +335,52 @@ class IFCExtractorApp(tk.Tk):
             except Exception as exc:
                 self._log_msg(f"  ✗ Error loading {name}: {exc}")
 
-        # Populate filter dropdowns
-        all_dfs_flat = {k: df for source in self._loaded_dfs.values() for k, df in source.items()}
-        ifc_types = get_unique_ifc_types(all_dfs_flat)
-        storeys = get_unique_storeys(all_dfs_flat)
+        # Populate filters
+        all_flat = {k: df for src in self._loaded_dfs.values() for k, df in src.items()}
+        ifc_types = get_unique_ifc_types(all_flat)
+        storeys   = get_unique_storeys(all_flat)
 
-        self.after(0, lambda: self._populate_filters(ifc_types, storeys))
-        self.after(0, lambda: self._run_btn.config(state="normal"))
-        self._log_msg("Files loaded. Ready to run extraction.")
+        summary = f"Ready — {len(self._loaded_dfs)} file(s), {total_elements:,} hierarchy rows"
+        self.after(0, lambda: self._on_load_done(ifc_types, storeys, summary))
 
-    def _populate_filters(self, ifc_types: list[str], storeys: list[str]):
-        self._type_listbox.delete(0, tk.END)
-        for t in ifc_types:
-            self._type_listbox.insert(tk.END, t)
+    def _on_load_done(self, ifc_types, storeys, summary):
+        self._populate_filter_panel(self._type_panel,   self._type_vars,   ifc_types)
+        self._populate_filter_panel(self._storey_panel, self._storey_vars, storeys)
+        self._file_badge.configure(text=summary, text_color="#3a9ad9")
+        self._log_msg(summary)
+        self._set_busy(False)
 
-        self._storey_listbox.delete(0, tk.END)
-        for s in storeys:
-            self._storey_listbox.insert(tk.END, s)
+    # ------------------------------------------------------------------
+    # Filter panel helpers
+    # ------------------------------------------------------------------
+
+    def _populate_filter_panel(self, panel, var_dict: dict, items: list[str]):
+        self._clear_filter_panel(panel, var_dict)
+        for item in items:
+            var = tk.BooleanVar(value=False)
+            var_dict[item] = var
+            ctk.CTkCheckBox(panel, text=item, variable=var,
+                            font=ctk.CTkFont(size=11)).pack(anchor="w", pady=1)
+
+    def _clear_filter_panel(self, panel, var_dict: dict):
+        for widget in panel.winfo_children():
+            widget.destroy()
+        var_dict.clear()
+
+    def _select_all(self, var_dict: dict):
+        for v in var_dict.values():
+            v.set(True)
+
+    def _select_none(self, var_dict: dict):
+        for v in var_dict.values():
+            v.set(False)
 
     # ------------------------------------------------------------------
     # Export
     # ------------------------------------------------------------------
 
     def _browse_output(self):
+        from tkinter import filedialog
         folder = filedialog.askdirectory(title="Select output folder")
         if folder:
             self._output_dir.set(folder)
@@ -220,28 +389,20 @@ class IFCExtractorApp(tk.Tk):
         if not self._loaded_dfs:
             self._log_msg("No files loaded. Click 'Load Files' first.")
             return
-        self._run_btn.config(state="disabled")
+        self._set_busy(True)
         threading.Thread(target=self._run_thread, daemon=True).start()
 
     def _run_thread(self):
-        self._log_msg("Starting extraction…")
+        self._log_msg("Applying filters and exporting…")
 
-        # Read filter selections
-        selected_types = [
-            self._type_listbox.get(i)
-            for i in self._type_listbox.curselection()
-        ]
-        selected_storeys = [
-            self._storey_listbox.get(i)
-            for i in self._storey_listbox.curselection()
-        ]
+        selected_types   = [k for k, v in self._type_vars.items()   if v.get()]
+        selected_storeys = [k for k, v in self._storey_vars.items() if v.get()]
 
-        # Apply filters to each source
-        filtered_results = {}
-        for source_path, dfs in self._loaded_dfs.items():
-            filtered_results[source_path] = apply_filters(
+        filtered = {}
+        for src, dfs in self._loaded_dfs.items():
+            filtered[src] = apply_filters(
                 dfs,
-                ifc_types=selected_types or None,
+                ifc_types=selected_types   or None,
                 storeys=selected_storeys or None,
             )
 
@@ -251,32 +412,44 @@ class IFCExtractorApp(tk.Tk):
         try:
             if mode == "per_ifc":
                 paths = exporter.export_per_ifc(
-                    filtered_results,
-                    output_dir,
+                    filtered, output_dir,
                     progress_callback=self._log_msg,
                 )
-                self._log_msg(f"Done. {len(paths)} file(s) written to {output_dir}")
+                self._log_msg(f"✅  Done — {len(paths)} file(s) written to {output_dir}")
             else:
                 path = exporter.export_merged(
-                    filtered_results,
-                    output_dir,
+                    filtered, output_dir,
                     progress_callback=self._log_msg,
                 )
-                self._log_msg(f"Done. Merged file written to {path}")
-
+                self._log_msg(f"✅  Done — merged file written to {path}")
         except Exception as exc:
-            self._log_msg(f"Export error: {exc}")
+            self._log_msg(f"❌  Export error: {exc}")
 
-        self.after(0, lambda: self._run_btn.config(state="normal"))
+        self.after(0, lambda: self._set_busy(False))
 
     # ------------------------------------------------------------------
-    # Logging
+    # Busy state (progress bar + button disable)
+    # ------------------------------------------------------------------
+
+    def _set_busy(self, busy: bool):
+        if busy:
+            self._run_btn.configure(state="disabled")
+            self._progress.configure(mode="indeterminate")
+            self._progress.start()
+        else:
+            self._progress.stop()
+            self._progress.configure(mode="determinate")
+            self._progress.set(1)
+            self._run_btn.configure(state="normal")
+
+    # ------------------------------------------------------------------
+    # Log
     # ------------------------------------------------------------------
 
     def _log_msg(self, msg: str):
         def _append():
-            self._log.config(state="normal")
-            self._log.insert(tk.END, msg + "\n")
-            self._log.see(tk.END)
-            self._log.config(state="disabled")
+            self._log.configure(state="normal")
+            self._log.insert("end", msg + "\n")
+            self._log.see("end")
+            self._log.configure(state="disabled")
         self.after(0, _append)

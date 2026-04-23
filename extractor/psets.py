@@ -36,8 +36,9 @@ def extract(ifc_file: ifcopenshell.file, source_filename: str = "") -> pd.DataFr
 
         pset_name = getattr(prop_def, "Name", "") or ""
 
-        # Only Pset_* sets — skip Qto_ and others
-        if not pset_name.startswith("Pset_"):
+        # Skip IfcElementQuantity sets — those are handled by quantities.py
+        # Accept ALL IfcPropertySet names: Pset_*, custom Revit sets, etc.
+        if not pset_name:
             continue
 
         for element in rel.RelatedObjects or []:
